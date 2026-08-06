@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.aws-sam/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+frontend/dist/
+backend/dist/
+*.tsbuildinfo
