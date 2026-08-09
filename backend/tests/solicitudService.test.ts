@@ -65,11 +65,10 @@ describe('SolicitudService', () => {
 
     for (const token of tokens) {
       await service.getChallenge(token);
-      const mail = (await mails.findAll()).find((m) => m.link.includes(token) || m.otp);
-      const latestOtpMail = (await mails.findAll()).find((m) => m.subject.includes('OTP'));
-      const otp = latestOtpMail!.otp;
+      const otpMail = (await mails.findAll()).find((m) => m.link.includes(token));
+      expect(otpMail).toBeTruthy();
 
-      await service.validateOtp(token, otp);
+      await service.validateOtp(token, otpMail!.otp);
       await service.decide(token, 'aprobar');
     }
 
@@ -93,7 +92,7 @@ describe('SolicitudService', () => {
     const token = solicitud.aprobadores[0].token;
 
     await service.getChallenge(token);
-    const otpMail = (await mails.findAll()).find((m) => m.subject.includes('OTP'));
+    const otpMail = (await mails.findAll()).find((m) => m.link.includes(token));
     await service.validateOtp(token, otpMail!.otp);
     const updated = await service.decide(token, 'rechazar');
 
