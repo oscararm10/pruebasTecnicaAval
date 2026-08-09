@@ -9,4 +9,5 @@ coverage/
 .DS_Store
 frontend/dist/
 backend/dist/
+backend/.data/
 *.tsbuildinfo

@@ -77,13 +77,34 @@ describe('SolicitudService edge cases', () => {
     const { solicitud } = await service.create(validDto);
     const token = solicitud.aprobadores[0].token;
     await service.getChallenge(token);
-    const otp = (await mails.findAll()).find((m) => m.subject.includes('OTP'))!.otp;
+    const otp = (await mails.findAll()).find((m) => m.link.includes(token))!.otp;
     await service.validateOtp(token, otp);
     await service.decide(token, 'aprobar');
 
     const challenge = await service.getChallenge(token);
     expect(challenge.requiresOtp).toBe(false);
     expect(challenge.otpHint).toContain('Firmado');
+  });
+
+  it('reutiliza OTP vigente en getChallenge sin invalidar el anterior', async () => {
+    const { service, mails, solicitudes } = buildService();
+    const { solicitud } = await service.create(validDto);
+    const token = solicitud.aprobadores[0].token;
+    const initialMail = (await mails.findAll()).find((m) => m.link.includes(token))!;
+    const before = await solicitudes.findById(solicitud.id);
+    const hashBefore = before!.aprobadores[0].otpHash;
+
+    const first = await service.getChallenge(token);
+    const second = await service.getChallenge(token);
+    const after = await solicitudes.findById(solicitud.id);
+
+    expect(first.requiresOtp).toBe(true);
+    expect(second.otpHint).toContain('vigente');
+    expect(after!.aprobadores[0].otpHash).toBe(hashBefore);
+    expect((await mails.findAll()).filter((m) => m.subject.includes('OTP para aprobar'))).toHaveLength(
+      0
+    );
+    await expect(service.validateOtp(token, initialMail.otp)).resolves.toBeTruthy();
   });
 
   it('decide sin sesión OTP falla', async () => {

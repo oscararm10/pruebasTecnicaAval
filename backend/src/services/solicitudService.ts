@@ -78,29 +78,40 @@ export class SolicitudService {
       };
     }
 
-    const otp = generateOtp();
-    aprobador.otpHash = hashOtp(otp);
-    aprobador.otpExpiresAt = otpExpiryIso();
-    found.solicitud.updatedAt = new Date().toISOString();
-    await this.solicitudes.update(found.solicitud);
+    const otpStillValid =
+      !!aprobador.otpHash &&
+      !!aprobador.otpExpiresAt &&
+      new Date(aprobador.otpExpiresAt).getTime() > Date.now();
 
-    await this.mails.save({
-      id: uuidv4(),
-      to: aprobador.email,
-      subject: `OTP para aprobar: ${found.solicitud.titulo}`,
-      body: `Su código OTP es ${otp}. Válido por 3 minutos.`,
-      link: '',
-      otp,
-      solicitudId: found.solicitud.id,
-      createdAt: new Date().toISOString(),
-    });
+    // Reutilizar OTP vigente evita invalidar el código por dobles GET
+    // (p. ej. React Strict Mode en desarrollo) o al refrescar el link.
+    if (!otpStillValid) {
+      const otp = generateOtp();
+      aprobador.otpHash = hashOtp(otp);
+      aprobador.otpExpiresAt = otpExpiryIso();
+      found.solicitud.updatedAt = new Date().toISOString();
+      await this.solicitudes.update(found.solicitud);
+
+      await this.mails.save({
+        id: uuidv4(),
+        to: aprobador.email,
+        subject: `OTP para aprobar: ${found.solicitud.titulo}`,
+        body: `Su código OTP es ${otp}. Válido por 3 minutos.`,
+        link: '',
+        otp,
+        solicitudId: found.solicitud.id,
+        createdAt: new Date().toISOString(),
+      });
+    }
 
     return {
       solicitudId: found.solicitud.id,
       aprobadorNombre: aprobador.nombre,
       aprobadorRol: aprobador.rol,
       requiresOtp: true,
-      otpHint: 'OTP enviado (ver /api/mock-mail). Válido 3 minutos.',
+      otpHint: otpStillValid
+        ? 'OTP vigente (use el más reciente en /api/mock-mail). Válido 3 minutos.'
+        : 'OTP enviado (ver /api/mock-mail). Válido 3 minutos.',
     };
   }
 
@@ -108,6 +119,7 @@ export class SolicitudService {
     sessionValidUntil: string;
     solicitud: Solicitud;
   }> {
+    const normalizedOtp = String(otp ?? '').trim();
     const found = await this.solicitudes.findByApproverToken(token);
     if (!found) throw new NotFoundError('Token de aprobación inválido');
 
@@ -122,7 +134,7 @@ export class SolicitudService {
     if (new Date(aprobador.otpExpiresAt).getTime() <= Date.now()) {
       throw new BusinessError('OTP expirado. Solicite uno nuevo abriendo el link.');
     }
-    if (hashOtp(otp) !== aprobador.otpHash) {
+    if (!normalizedOtp || hashOtp(normalizedOtp) !== aprobador.otpHash) {
       throw new BusinessError('OTP incorrecto');
     }
 

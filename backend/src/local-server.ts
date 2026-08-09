@@ -2,12 +2,14 @@ import cors from 'cors';
 import express from 'express';
 import { APIGatewayProxyEvent } from 'aws-lambda';
 import { handler } from './handlers/router';
+import { getLocalDbPath } from './shared/container';
 
 process.env.LOCAL_MODE = process.env.LOCAL_MODE || 'true';
 process.env.APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:3000';
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
+const dbPath = getLocalDbPath();
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -41,6 +43,7 @@ app.all('*', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Aval backend local en http://localhost:${PORT}`);
   console.log(`LOCAL_MODE=${process.env.LOCAL_MODE}`);
+  console.log(`SQLite: ${dbPath}`);
 });
 
 function toApiGatewayEvent(req: express.Request): APIGatewayProxyEvent {

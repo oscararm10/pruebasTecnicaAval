@@ -5,6 +5,13 @@ import {
 } from '../repositories/inMemoryStore';
 import { DynamoMailStore, DynamoSolicitudStore } from '../repositories/dynamoStore';
 import { S3PdfStore } from '../repositories/s3Store';
+import {
+  getDefaultSqlitePath,
+  openSqliteDatabase,
+  SqliteMailStore,
+  SqlitePdfStore,
+  SqliteSolicitudStore,
+} from '../repositories/sqliteStore';
 import { MailStore, PdfStore, SolicitudStore } from '../repositories/interfaces';
 import { SolicitudService } from '../services/solicitudService';
 
@@ -12,8 +19,38 @@ const memorySolicitudes = new InMemorySolicitudStore();
 const memoryMails = new InMemoryMailStore();
 const memoryPdfs = new InMemoryPdfStore();
 
+let sqliteStores: {
+  solicitudes: SolicitudStore;
+  mails: MailStore;
+  pdfs: PdfStore;
+  dbPath: string;
+} | null = null;
+
 export function isLocalMode(): boolean {
   return process.env.LOCAL_MODE === 'true' || !process.env.TABLE_NAME;
+}
+
+function getSqliteStores(): {
+  solicitudes: SolicitudStore;
+  mails: MailStore;
+  pdfs: PdfStore;
+  dbPath: string;
+} {
+  if (!sqliteStores) {
+    const dbPath = getDefaultSqlitePath();
+    const db = openSqliteDatabase(dbPath);
+    sqliteStores = {
+      solicitudes: new SqliteSolicitudStore(db),
+      mails: new SqliteMailStore(db),
+      pdfs: new SqlitePdfStore(db),
+      dbPath,
+    };
+  }
+  return sqliteStores;
+}
+
+export function getLocalDbPath(): string {
+  return getSqliteStores().dbPath;
 }
 
 export function getStores(): {
@@ -22,11 +59,8 @@ export function getStores(): {
   pdfs: PdfStore;
 } {
   if (isLocalMode()) {
-    return {
-      solicitudes: memorySolicitudes,
-      mails: memoryMails,
-      pdfs: memoryPdfs,
-    };
+    const { solicitudes, mails, pdfs } = getSqliteStores();
+    return { solicitudes, mails, pdfs };
   }
   return {
     solicitudes: new DynamoSolicitudStore(),
@@ -41,6 +75,7 @@ export function createService(): SolicitudService {
   return new SolicitudService(stores.solicitudes, stores.mails, stores.pdfs, baseUrl);
 }
 
+/** Solo limpia stores en memoria (tests unitarios que los usan directamente). */
 export function resetMemoryStores(): void {
   memorySolicitudes.clear();
   memoryMails.clear();
