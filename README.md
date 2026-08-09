@@ -52,7 +52,7 @@ Diseñar e implementar un flujo de aprobaciones con firmas digitales concatenada
 | 5 | OTP único, TTL 3 minutos | Hash SHA-256 + `otpExpiresAt` |
 | 6 | Aprobar / rechazar con firma | Nombre + timestamp (+ firma simulada en PDF) |
 | 7 | Panel de estados del solicitante | Lista + detalle con badges |
-| 8 | PDF al completar 3 firmas | `pdfkit` → S3 (AWS) o memoria (local) |
+| 8 | PDF al completar 3 firmas | `pdfkit` → S3 (AWS) o SQLite (local) |
 | 9 | Descarga de evidencia | `GET /api/solicitudes/{id}/evidencia.pdf` |
 | 10 | Arquitectura serverless | SAM: Lambda + API GW + DynamoDB + S3 |
 | 11 | Micro-frontends | Webpack Module Federation |
@@ -70,6 +70,7 @@ Diseñar e implementar un flujo de aprobaciones con firmas digitales concatenada
 | Express | Servidor local de desarrollo |
 | AWS Lambda + API Gateway | Exposición REST en AWS |
 | DynamoDB | Persistencia NoSQL (producción) |
+| SQLite (`better-sqlite3`) | Persistencia local (solo desarrollo) |
 | S3 | Almacenamiento de PDFs |
 | pdfkit | Generación de evidencia PDF |
 | AWS SAM | Infraestructura como código |
@@ -109,10 +110,10 @@ Diseñar e implementar un flujo de aprobaciones con firmas digitales concatenada
               ┌────────────────────────┼────────────────────────┐
               ▼                        ▼                        ▼
      SolicitudStore              MailStore                 PdfStore
-   (Memory / DynamoDB)      (Memory / DynamoDB)      (Memory / S3)
+   (SQLite / DynamoDB)      (SQLite / DynamoDB)      (SQLite / S3)
 ```
 
-**Modo local:** `LOCAL_MODE=true` (por defecto si no hay `TABLE_NAME`) usa almacenes en memoria.
+**Modo local:** `LOCAL_MODE=true` (por defecto si no hay `TABLE_NAME`) usa SQLite en `backend/.data/aval.db`.
 
 **Modo AWS:** DynamoDB + S3 configurados por variables de entorno de la Lambda.
 
@@ -137,7 +138,7 @@ Aval/
 │   │   ├── domain/types.ts
 │   │   ├── handlers/         ← API Gateway / Express adapters
 │   │   ├── services/         ← Lógica de negocio + PDF
-│   │   ├── repositories/     ← Memory / DynamoDB / S3
+│   │   ├── repositories/     ← SQLite / DynamoDB / S3
 │   │   ├── shared/           ← OTP, response, DI container
 │   │   └── local-server.ts   ← Express local :4000
 │   └── tests/
@@ -189,8 +190,8 @@ npm run dev:backend
 ```
 
 - URL: `http://localhost:4000`
-- Modo: in-memory (`LOCAL_MODE=true`)
-- Los datos se reinician al detener el proceso
+- Modo: SQLite local (`LOCAL_MODE=true`)
+- Persistencia: `backend/.data/aval.db` (sobrevive reinicios; borrar el archivo resetea los datos)
 
 ### Terminal 3 — Frontend
 
@@ -214,7 +215,7 @@ Abra el navegador en: **http://localhost:3000**
 3. Enviar. Queda en estado **Pendiente**.
 4. En el detalle verá los **links de aprobación** (simulación de email).
 5. Abrir un link (o ir a **Mock mail** y usar el link).
-6. Al abrir el link el sistema **regenera un OTP** (válido 3 minutos). Consúltelo en **Mock mail** (asunto con “OTP”).
+6. Al abrir el link, si el OTP sigue vigente se **reutiliza**; si expiró se genera uno nuevo. Consúltelo en **Mock mail** (el del link del aprobador o el asunto “OTP para aprobar”).
 7. Ingresar el OTP → se muestra el detalle de la compra.
 8. **Aprobar y firmar** o **Rechazar**.
 9. Repetir con los otros 2 aprobadores (si todos aprueban).
@@ -328,7 +329,7 @@ Detalle de una solicitud con estado de cada aprobador y firmas.
 
 ### `GET /api/approve?approver_token={uuid}`
 
-Inicia el desafío OTP para el aprobador (regenera OTP y lo registra en mock-mail).
+Inicia el desafío OTP para el aprobador (reutiliza OTP vigente o genera uno nuevo si expiró).
 
 ```json
 {
@@ -431,7 +432,7 @@ El shell monta ambos MFEs por rutas; el `remoteEntry.js` permite consumirlos des
 | `services/solicitudService.ts` | Crear, OTP, decidir, listar mails, evidencia |
 | `services/pdfService.ts` | Render del PDF con pdfkit |
 | `repositories/` | Abstracción `SolicitudStore` / `MailStore` / `PdfStore` |
-| `shared/container.ts` | Elige Memory vs DynamoDB+S3 según entorno |
+| `shared/container.ts` | Elige SQLite (local) vs DynamoDB+S3 (AWS) |
 
 ### DynamoDB (diseño single-table)
 
@@ -456,7 +457,7 @@ Objetos: `evidencias/{solicitudId}.pdf`
 | Token de aprobador | UUID v4 en el link; no reutilizable entre aprobadores |
 | OTP | 6 dígitos; se hashea con SHA-256 antes de persistir |
 | TTL OTP | **3 minutos** desde generación |
-| Regeneración | Cada `GET /api/approve` genera un OTP nuevo |
+| Regeneración | Solo si no hay OTP o ya expiró; si sigue vigente se reutiliza |
 | Sesión post-OTP | ~15 minutos para poder aprobar/rechazar |
 | Firma | Nombre del aprobador + timestamp ISO |
 | CORS | Abierto en demo (`*`); restringir en producción |
@@ -598,9 +599,10 @@ sam delete --stack-name aval-aprobaciones
 
 | Variable | Default local | Descripción |
 |----------|---------------|-------------|
-| `LOCAL_MODE` | `true` | Usa memoria en lugar de AWS |
+| `LOCAL_MODE` | `true` | Usa SQLite en lugar de AWS |
 | `PORT` | `4000` | Puerto Express |
 | `APP_BASE_URL` | `http://localhost:3000` | Base de links en correos |
+| `SQLITE_PATH` | `backend/.data/aval.db` | Ruta del archivo SQLite (solo local) |
 | `TABLE_NAME` | — | Tabla DynamoDB (AWS) |
 | `BUCKET_NAME` | — | Bucket S3 de PDFs (AWS) |
 | `API_BASE_URL` | `''` (mismo origen) | Base URL Axios en frontend |
@@ -612,12 +614,12 @@ sam delete --stack-name aval-aprobaciones
 | Problema | Solución |
 |----------|----------|
 | Frontend no llama al API | Verifique que el backend esté en `:4000` y el proxy de Webpack activo |
-| OTP inválido | Al abrir el link se regenera; use el OTP **más reciente** en Mock mail |
+| OTP inválido | Use el OTP del mail de ese aprobador en Mock mail (si expiró, reabra el link) |
 | OTP expirado | Espere < 3 min o vuelva a abrir el link de aprobación |
 | “Sesión OTP inválida” | Valide de nuevo el OTP antes de aprobar/rechazar |
 | PDF 400 / no disponible | Solo existe cuando los 3 aprobaron (`Completada`) |
 | Roles duplicados al crear | Los 3 roles deben ser distintos |
-| Datos “desaparecen” en local | El store en memoria se borra al reiniciar el backend |
+| Quieres resetear datos en local | Borre `backend/.data/aval.db` (y reinicie el backend si está corriendo) |
 | `sam build` falla en Windows | Ejecute el build en WSL/CI Linux, o compile con `npm run build` y ajuste el artefacto |
 | CORS en AWS | El template ya permite origen `*`; si usa dominio propio, restrínjalo |
 
