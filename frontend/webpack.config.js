@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { ModuleFederationPlugin } = require('webpack').container;
 
@@ -61,14 +62,20 @@ module.exports = {
       template: './public/index.html',
       title: 'Aval - Aprobaciones',
     }),
+    new webpack.DefinePlugin({
+      'process.env.API_BASE_URL': JSON.stringify(
+        process.env.API_BASE_URL || ''
+      ),
+    }),
   ],
   devServer: {
     port: 3000,
     historyApiFallback: true,
     hot: true,
+    // Solo /api: /mock-mail es ruta SPA del frontend; el API es GET /api/mock-mail
     proxy: [
       {
-        context: ['/api', '/mock-mail'],
+        context: ['/api'],
         target: 'http://localhost:4000',
         changeOrigin: true,
       },

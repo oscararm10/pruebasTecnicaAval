@@ -28,13 +28,25 @@ export async function getSolicitud(id: string): Promise<Solicitud> {
   return data;
 }
 
+const approveChallengeInflight = new Map<string, Promise<ApproveChallenge>>();
+
 export async function getApproveChallenge(
   token: string
 ): Promise<ApproveChallenge> {
-  const { data } = await api.get('/api/approve', {
-    params: { approver_token: token },
-  });
-  return data;
+  const existing = approveChallengeInflight.get(token);
+  if (existing) return existing;
+
+  const request = api
+    .get('/api/approve', {
+      params: { approver_token: token },
+    })
+    .then(({ data }) => data as ApproveChallenge)
+    .finally(() => {
+      approveChallengeInflight.delete(token);
+    });
+
+  approveChallengeInflight.set(token, request);
+  return request;
 }
 
 export async function validateOtp(
@@ -43,7 +55,7 @@ export async function validateOtp(
 ): Promise<{ sessionValidUntil: string; solicitud: Solicitud }> {
   const { data } = await api.post('/api/approve/otp', {
     approver_token: token,
-    otp,
+    otp: String(otp).trim(),
   });
   return data;
 }
