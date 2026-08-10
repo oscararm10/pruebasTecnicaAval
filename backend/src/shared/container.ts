@@ -5,13 +5,6 @@ import {
 } from '../repositories/inMemoryStore';
 import { DynamoMailStore, DynamoSolicitudStore } from '../repositories/dynamoStore';
 import { S3PdfStore } from '../repositories/s3Store';
-import {
-  getDefaultSqlitePath,
-  openSqliteDatabase,
-  SqliteMailStore,
-  SqlitePdfStore,
-  SqliteSolicitudStore,
-} from '../repositories/sqliteStore';
 import { MailStore, PdfStore, SolicitudStore } from '../repositories/interfaces';
 import { SolicitudService } from '../services/solicitudService';
 
@@ -37,12 +30,15 @@ function getSqliteStores(): {
   dbPath: string;
 } {
   if (!sqliteStores) {
-    const dbPath = getDefaultSqlitePath();
-    const db = openSqliteDatabase(dbPath);
+    // require dinámico: evita cargar better-sqlite3 en el bundle de Lambda
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sqlite = require('../repositories/sqliteStore') as typeof import('../repositories/sqliteStore');
+    const dbPath = sqlite.getDefaultSqlitePath();
+    const db = sqlite.openSqliteDatabase(dbPath);
     sqliteStores = {
-      solicitudes: new SqliteSolicitudStore(db),
-      mails: new SqliteMailStore(db),
-      pdfs: new SqlitePdfStore(db),
+      solicitudes: new sqlite.SqliteSolicitudStore(db),
+      mails: new sqlite.SqliteMailStore(db),
+      pdfs: new sqlite.SqlitePdfStore(db),
       dbPath,
     };
   }

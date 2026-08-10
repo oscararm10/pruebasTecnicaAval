@@ -29,15 +29,14 @@ Resources:
       StageName: Prod
       Cors:
         AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization'"
+        AllowHeaders: "'Content-Type,Authorization,Accept'"
         AllowOrigin: "'*'"
       BinaryMediaTypes:
-        - application/pdf
+        # Solo PDF. NO usar '*/*': corrompe respuestas JSON (POST /api/solicitudes, etc.).
+        - application~1pdf
 
   AvalFunction:
     Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
     Properties:
       CodeUri: ./
       Handler: dist/handlers/router.handler

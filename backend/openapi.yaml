@@ -1,0 +1,519 @@
+openapi: 3.0.3
+info:
+  title: Aval API — Flujo de aprobaciones
+  version: 1.0.0
+  description: |
+    API REST del flujo de solicitud de compra con 3 aprobadores, OTP y evidencia PDF.
+
+    ## Guía de pruebas (paso a paso)
+
+    Base local: `http://localhost:4000`  
+    UI interactiva: [Swagger UI](/api/docs) (este documento).
+
+    1. **Crear solicitud** — `POST /api/solicitudes`  
+       Use el ejemplo del body (3 aprobadores con **roles distintos**).  
+       Guarde el `solicitud.id` y los `mails[].otp` / tokens del link.
+
+    2. **Consultar mock-mail** — `GET /api/mock-mail?solicitud_id={id}`  
+       Copie el `otp` del aprobador y el `approver_token` del query string en `link`  
+       (`.../approve?solicitud_id=...&approver_token=UUID`).
+
+    3. **Iniciar desafío OTP** — `GET /api/approve?approver_token={uuid}`  
+       Si el OTP sigue vigente se reutiliza; si expiró se genera uno nuevo (véalo en mock-mail).
+
+    4. **Validar OTP** — `POST /api/approve/otp`  
+       Body: `{ "approver_token": "...", "otp": "123456" }`.  
+       Abre sesión de decisión (~15 minutos).
+
+    5. **Decidir** — `POST /api/approve/decision`  
+       Body: `{ "approver_token": "...", "decision": "aprobar" }` o `"rechazar"`.  
+       Repita los pasos 2–5 para los **3 aprobadores** (con `aprobar`) para completar.
+
+    6. **Descargar evidencia** — `GET /api/solicitudes/{id}/evidencia.pdf`  
+       Solo disponible si `estado === Completada` (tres firmas).
+
+    ### Notas
+
+    - OTP válido **3 minutos**; sesión post-OTP **~15 minutos**.
+    - Errores: `{ "error": "mensaje descriptivo" }`.
+    - Persistencia local: SQLite en `backend/.data/aval.db`.
+    - No se requiere `Authorization`; el token de aprobador va en query/body.
+
+servers:
+  - url: http://localhost:4000
+    description: Backend local (Express)
+
+tags:
+  - name: Solicitudes
+    description: Creación, listado y evidencia PDF
+  - name: Aprobación
+    description: Desafío OTP, validación y decisión
+  - name: Mock mail
+    description: Correos simulados (OTP y links)
+
+paths:
+  /api/solicitudes:
+    post:
+      tags: [Solicitudes]
+      summary: Crear solicitud de compra
+      description: |
+        Crea la solicitud, asocia exactamente 3 aprobadores con roles distintos,
+        genera tokens y simula 3 correos en mock-mail (con OTP inicial).
+      operationId: createSolicitud
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSolicitud'
+            example:
+              titulo: Laptops desarrollo
+              descripcion: Compra de 10 laptops para el equipo
+              monto: 25000000
+              solicitante: Ana Pérez
+              aprobadores:
+                - nombre: Carlos Ruiz
+                  email: carlos@empresa.com
+                  rol: Gerente
+                - nombre: Laura Gómez
+                  email: laura@empresa.com
+                  rol: Finanzas
+                - nombre: Pedro Díaz
+                  email: pedro@empresa.com
+                  rol: Compras
+      responses:
+        '201':
+          description: Solicitud creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSolicitudResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      tags: [Solicitudes]
+      summary: Listar solicitudes
+      description: Lista todas las solicitudes, más recientes primero.
+      operationId: listSolicitudes
+      responses:
+        '200':
+          description: Listado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SolicitudList'
+
+  /api/solicitudes/{id}:
+    get:
+      tags: [Solicitudes]
+      summary: Obtener solicitud por ID
+      description: Detalle con estado de cada aprobador y firmas (sin secretos OTP).
+      operationId: getSolicitud
+      parameters:
+        - $ref: '#/components/parameters/SolicitudId'
+      responses:
+        '200':
+          description: Solicitud
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Solicitud'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/solicitudes/{id}/evidencia.pdf:
+    get:
+      tags: [Solicitudes]
+      summary: Descargar evidencia PDF
+      description: |
+        Solo disponible cuando la solicitud está `Completada` (3 firmas).
+        Respuesta binaria `application/pdf`.
+      operationId: downloadEvidencia
+      parameters:
+        - $ref: '#/components/parameters/SolicitudId'
+      responses:
+        '200':
+          description: PDF de evidencia
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/approve:
+    get:
+      tags: [Aprobación]
+      summary: Iniciar desafío OTP
+      description: |
+        Reutiliza el OTP si sigue vigente; si expiró genera uno nuevo y lo registra en mock-mail.
+      operationId: getApproveChallenge
+      parameters:
+        - name: approver_token
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Token UUID del aprobador (viene en el link del mock-mail)
+          example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        '200':
+          description: Desafío OTP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApproveChallenge'
+              example:
+                solicitudId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                aprobadorNombre: Carlos Ruiz
+                aprobadorRol: Gerente
+                requiresOtp: true
+                otpHint: OTP vigente (use el más reciente en /api/mock-mail). Válido 3 minutos.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/approve/otp:
+    post:
+      tags: [Aprobación]
+      summary: Validar OTP
+      description: Si el OTP es correcto, abre sesión de decisión (~15 min).
+      operationId: validateOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateOtpRequest'
+            example:
+              approver_token: 550e8400-e29b-41d4-a716-446655440000
+              otp: '123456'
+      responses:
+        '200':
+          description: OTP válido; sesión abierta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateOtpResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/approve/decision:
+    post:
+      tags: [Aprobación]
+      summary: Registrar decisión
+      description: |
+        Requiere sesión OTP válida.  
+        `aprobar` firma; al tercer aprobar genera PDF y marca `Completada`.  
+        `rechazar` marca la solicitud como `Rechazada`.
+      operationId: decideAprobacion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+            examples:
+              aprobar:
+                value:
+                  approver_token: 550e8400-e29b-41d4-a716-446655440000
+                  decision: aprobar
+              rechazar:
+                value:
+                  approver_token: 550e8400-e29b-41d4-a716-446655440000
+                  decision: rechazar
+      responses:
+        '200':
+          description: Solicitud actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Solicitud'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/mock-mail:
+    get:
+      tags: [Mock mail]
+      summary: Listar correos simulados
+      description: |
+        Incluye `link`, `otp` y `solicitudId`.  
+        Filtre por `solicitud_id` para acotar al flujo bajo prueba.
+      operationId: listMockMail
+      parameters:
+        - name: solicitud_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filtrar mails de una solicitud
+      responses:
+        '200':
+          description: Correos simulados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MockMailList'
+
+components:
+  parameters:
+    SolicitudId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: ID de la solicitud
+
+  responses:
+    BadRequest:
+      description: Error de negocio o validación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: OTP incorrecto
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: Solicitud no encontrada
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: mensaje descriptivo
+
+    AprobadorInput:
+      type: object
+      required: [nombre, email, rol]
+      properties:
+        nombre:
+          type: string
+          example: Carlos Ruiz
+        email:
+          type: string
+          format: email
+          example: carlos@empresa.com
+        rol:
+          type: string
+          description: Debe ser distinto entre los 3 aprobadores
+          example: Gerente
+
+    CreateSolicitud:
+      type: object
+      required: [titulo, descripcion, monto, solicitante, aprobadores]
+      properties:
+        titulo:
+          type: string
+        descripcion:
+          type: string
+        monto:
+          type: number
+          exclusiveMinimum: 0
+          example: 25000000
+        solicitante:
+          type: string
+        aprobadores:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/AprobadorInput'
+
+    Firma:
+      type: object
+      required: [nombre, fecha]
+      properties:
+        nombre:
+          type: string
+        fecha:
+          type: string
+          format: date-time
+        imagenSimulada:
+          type: string
+          example: signature://Carlos Ruiz
+
+    Aprobador:
+      type: object
+      required: [id, nombre, email, rol, token, estado]
+      properties:
+        id:
+          type: string
+          format: uuid
+        nombre:
+          type: string
+        email:
+          type: string
+          format: email
+        rol:
+          type: string
+        token:
+          type: string
+          format: uuid
+          description: Token para el link de aprobación
+        estado:
+          type: string
+          enum: [Pendiente, Firmado, Rechazado]
+        firma:
+          $ref: '#/components/schemas/Firma'
+
+    Solicitud:
+      type: object
+      required:
+        [id, titulo, descripcion, monto, solicitante, estado, aprobadores, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        titulo:
+          type: string
+        descripcion:
+          type: string
+        monto:
+          type: number
+        solicitante:
+          type: string
+        estado:
+          type: string
+          enum: [Pendiente, Completada, Rechazada]
+        aprobadores:
+          type: array
+          items:
+            $ref: '#/components/schemas/Aprobador'
+        evidenciaKey:
+          type: string
+          description: Presente cuando existe el PDF
+          example: evidencias/{id}.pdf
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MockMail:
+      type: object
+      required: [id, to, subject, body, link, otp, solicitudId, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        to:
+          type: string
+          format: email
+        subject:
+          type: string
+        body:
+          type: string
+        link:
+          type: string
+          description: URL de aprobación con approver_token
+          example: http://localhost:3000/approve?solicitud_id=...&approver_token=...
+        otp:
+          type: string
+          pattern: '^\d{6}$'
+          example: '123456'
+        solicitudId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateSolicitudResponse:
+      type: object
+      required: [solicitud, mails]
+      properties:
+        solicitud:
+          $ref: '#/components/schemas/Solicitud'
+        mails:
+          type: array
+          items:
+            $ref: '#/components/schemas/MockMail'
+
+    SolicitudList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Solicitud'
+
+    MockMailList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MockMail'
+
+    ApproveChallenge:
+      type: object
+      required: [solicitudId, aprobadorNombre, aprobadorRol, requiresOtp]
+      properties:
+        solicitudId:
+          type: string
+          format: uuid
+        aprobadorNombre:
+          type: string
+        aprobadorRol:
+          type: string
+        requiresOtp:
+          type: boolean
+        otpHint:
+          type: string
+
+    ValidateOtpRequest:
+      type: object
+      required: [approver_token, otp]
+      properties:
+        approver_token:
+          type: string
+          format: uuid
+        otp:
+          type: string
+          pattern: '^\d{6}$'
+          example: '123456'
+
+    ValidateOtpResponse:
+      type: object
+      required: [sessionValidUntil, solicitud]
+      properties:
+        sessionValidUntil:
+          type: string
+          format: date-time
+        solicitud:
+          $ref: '#/components/schemas/Solicitud'
+
+    DecisionRequest:
+      type: object
+      required: [approver_token, decision]
+      properties:
+        approver_token:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [aprobar, rechazar]

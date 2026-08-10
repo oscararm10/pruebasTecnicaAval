@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
-  evidenciaUrl,
+  downloadEvidencia,
   formatDate,
   formatMoney,
   getErrorMessage,
@@ -17,6 +17,7 @@ export function SolicitudDetailPage() {
   const [mails, setMails] = useState<MockMail[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -40,8 +41,21 @@ export function SolicitudDetailPage() {
     void load();
   }, [load]);
 
+  async function onDownloadPdf() {
+    if (!solicitud) return;
+    setDownloading(true);
+    setError('');
+    try {
+      await downloadEvidencia(solicitud.id);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   if (loading) return <p className="meta">Cargando detalle…</p>;
-  if (error) return <div className="alert alert-error">{error}</div>;
+  if (error && !solicitud) return <div className="alert alert-error">{error}</div>;
   if (!solicitud) return <p className="empty">Solicitud no encontrada</p>;
 
   return (
@@ -59,11 +73,18 @@ export function SolicitudDetailPage() {
             Actualizar
           </button>
           {solicitud.estado === 'Completada' && (
-            <a className="btn btn-primary" href={evidenciaUrl(solicitud.id)}>
-              Descargar PDF
-            </a>
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={downloading}
+              onClick={() => void onDownloadPdf()}
+            >
+              {downloading ? 'Descargando…' : 'Descargar PDF'}
+            </button>
           )}
         </div>
+
+        {error && <div className="alert alert-error">{error}</div>}
 
         <div className="meta">
           Monto: <strong>{formatMoney(solicitud.monto)}</strong>
