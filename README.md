@@ -625,26 +625,6 @@ sam delete --stack-name aval-aprobaciones
 
 ---
 
-## Cumplimiento de la prueba (checklist)
-
-- [x] Cliente-servidor con APIs REST consumidas por el frontend  
-- [x] Crear solicitud con título, descripción, monto y 3 aprobadores  
-- [x] Estado inicial Pendiente + tokens UUID + links  
-- [x] Mock de correo (`/api/mock-mail`)  
-- [x] OTP único válido 3 minutos  
-- [x] Detalle + aprobar/rechazar con firma (nombre + fecha)  
-- [x] Panel de estados del solicitante  
-- [x] PDF con evidencias al completar 3 firmas  
-- [x] Endpoint de descarga del PDF  
-- [x] Estado Completada + botón descargar en UI  
-- [x] Enfoque serverless AWS (Lambda, API Gateway, DynamoDB, S3)  
-- [x] Frontend React + Axios/fetch + React Router  
-- [x] Micro-frontends con Webpack Module Federation  
-- [x] Pruebas con cobertura ≥ 60%  
-- [x] Documentación (este README)
-
----
-
 ## Licencia / uso
 
 Proyecto elaborado como **prueba técnica**. Uso libre para evaluación y demostración.

@@ -1,0 +1,19 @@
+# Usado por `sam build` en lugar de .gitignore (así SÍ se incluye dist/)
+node_modules
+.aws-sam
+coverage
+tests
+src
+data
+*.db
+.git
+.env
+.env.*
+*.ts
+!dist/**/*.js
+tsconfig.json
+jest.config.*
+Makefile
+*.md
+*.log
+*.tsbuildinfo

@@ -36,8 +36,6 @@ Resources:
 
   AvalFunction:
     Type: AWS::Serverless::Function
-    Metadata:
-      BuildMethod: makefile
     Properties:
       CodeUri: ./
       Handler: dist/handlers/router.handler
