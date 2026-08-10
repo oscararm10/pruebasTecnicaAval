@@ -1,5 +1,9 @@
 import cors from 'cors';
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import swaggerUi from 'swagger-ui-express';
+import { parse as parseYaml } from 'yaml';
 import { APIGatewayProxyEvent } from 'aws-lambda';
 import { handler } from './handlers/router';
 import { getLocalDbPath } from './shared/container';
@@ -10,9 +14,30 @@ process.env.APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:3000';
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
 const dbPath = getLocalDbPath();
+const openApiPath = path.join(__dirname, '..', 'openapi.yaml');
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+
+app.get('/api/openapi.yaml', (_req, res) => {
+  res.type('application/yaml').send(fs.readFileSync(openApiPath, 'utf8'));
+});
+
+const openApiDocument = parseYaml(fs.readFileSync(openApiPath, 'utf8')) as Record<
+  string,
+  unknown
+>;
+app.use(
+  '/api/docs',
+  swaggerUi.serve,
+  swaggerUi.setup(openApiDocument, {
+    customSiteTitle: 'Aval API — Swagger',
+    swaggerOptions: {
+      url: '/api/openapi.yaml',
+      persistAuthorization: false,
+    },
+  })
+);
 
 app.all('*', async (req, res) => {
   const event = toApiGatewayEvent(req);
@@ -42,6 +67,8 @@ app.all('*', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Aval backend local en http://localhost:${PORT}`);
+  console.log(`Swagger UI: http://localhost:${PORT}/api/docs`);
+  console.log(`OpenAPI: http://localhost:${PORT}/api/openapi.yaml`);
   console.log(`LOCAL_MODE=${process.env.LOCAL_MODE}`);
   console.log(`SQLite: ${dbPath}`);
 });

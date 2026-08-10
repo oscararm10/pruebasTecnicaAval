@@ -17,7 +17,7 @@ describe('api helpers', () => {
     expect(value.length).toBeGreaterThan(5);
   });
 
-  it('arma url de evidencia', () => {
+  it('arma url de evidencia con base relativa por defecto', () => {
     expect(evidenciaUrl('abc')).toBe('/api/solicitudes/abc/evidencia.pdf');
   });
 

@@ -12,21 +12,22 @@ Cumple el escenario de la prueba técnica: Frontend (React + Webpack Module Fede
 2. [Funcionalidades](#2-funcionalidades)
 3. [Stack tecnológico](#3-stack-tecnológico)
 4. [Arquitectura](#4-arquitectura)
-5. [Estructura del repositorio](#5-estructura-del-repositorio)
-6. [Requisitos previos](#6-requisitos-previos)
-7. [Arranque local](#7-arranque-local)
-8. [Guía de demo (paso a paso)](#8-guía-de-demo-paso-a-paso)
-9. [Modelo de dominio y estados](#9-modelo-de-dominio-y-estados)
-10. [API REST](#10-api-rest)
-11. [Frontend (vistas y MFEs)](#11-frontend-vistas-y-mfes)
-12. [Backend (capas y persistencia)](#12-backend-capas-y-persistencia)
-13. [OTP, tokens y seguridad](#13-otp-tokens-y-seguridad)
-14. [PDF de evidencia](#14-pdf-de-evidencia)
-15. [Pruebas y cobertura](#15-pruebas-y-cobertura)
-16. [Despliegue en AWS (SAM)](#16-despliegue-en-aws-sam)
-17. [Scripts disponibles](#17-scripts-disponibles)
-18. [Variables de entorno](#18-variables-de-entorno)
-19. [Troubleshooting](#19-troubleshooting)
+5. [Supuestos](#5-supuestos)
+6. [Estructura del repositorio](#6-estructura-del-repositorio)
+7. [Requisitos previos](#7-requisitos-previos)
+8. [Arranque local](#8-arranque-local)
+9. [Guía de demo (paso a paso)](#9-guía-de-demo-paso-a-paso)
+10. [Modelo de dominio y estados](#10-modelo-de-dominio-y-estados)
+11. [API REST](#11-api-rest)
+12. [Frontend (vistas y MFEs)](#12-frontend-vistas-y-mfes)
+13. [Backend (capas y persistencia)](#13-backend-capas-y-persistencia)
+14. [OTP, tokens y seguridad](#14-otp-tokens-y-seguridad)
+15. [PDF de evidencia](#15-pdf-de-evidencia)
+16. [Pruebas y cobertura](#16-pruebas-y-cobertura)
+17. [Despliegue en AWS (SAM)](#17-despliegue-en-aws-sam)
+18. [Scripts disponibles](#18-scripts-disponibles)
+19. [Variables de entorno](#19-variables-de-entorno)
+20. [Troubleshooting](#20-troubleshooting)
 
 ---
 
@@ -119,7 +120,31 @@ Diseñar e implementar un flujo de aprobaciones con firmas digitales concatenada
 
 ---
 
-## 5. Estructura del repositorio
+## 5. Supuestos
+
+Decisiones y simplificaciones adoptadas para la prueba técnica (no es un producto de producción listo):
+
+| Tema | Supuesto |
+|------|----------|
+| Correo | No hay SMTP/SES real. Los “correos” se simulan, se persisten y se consultan en `GET /api/mock-mail` y en la vista **Mock mail**. |
+| Firma digital | Es una firma **simulada**: nombre del aprobador + timestamp (y representación tipográfica en el PDF). No hay PKI, certificados ni firma criptográfica del documento. |
+| Aprobadores | Cada solicitud exige **exactamente 3** aprobadores con **roles distintos**. |
+| OTP | 6 dígitos, hash SHA-256 al persistir, TTL de **3 minutos**. Si el OTP sigue vigente al reabrir el link, se **reutiliza**; si expiró, se genera uno nuevo. |
+| Sesión post-OTP | Tras validar el OTP, la ventana para aprobar/rechazar es de ~**15 minutos**. |
+| Rechazo | Si un aprobador rechaza, la solicitud pasa a **Rechazada** y **no** se genera PDF. |
+| PDF de evidencia | Solo se genera cuando los **3** aprobadores firman (estado **Completada**). |
+| Persistencia local | Con `LOCAL_MODE=true` se usa **SQLite** (`backend/.data/aval.db`), no AWS. En AWS: DynamoDB + S3. |
+| Links de aprobación | Se construyen con `APP_BASE_URL` (por defecto `http://localhost:3000` en local). |
+| Frontend / API en local | El webpack-dev-server hace proxy de `/api` → `http://localhost:4000`. Hace falta tener **backend y frontend** corriendo a la vez. |
+| Micro-frontends | Solicitante y Aprobador se exponen con Module Federation en el **mismo** build/host (shell), no como despliegues remotos independientes. |
+| CORS | En demo está abierto (`*`). En un entorno real debería restringirse al origen del frontend. |
+| Autenticación del solicitante | No hay login de solicitante; cualquiera puede crear y listar solicitudes en esta demo. |
+
+> En producción se esperarían correo real (SES/SMTP), rate-limit de OTP, HTTPS, CORS restringido y un modelo de firma alineado a requisitos legales/PKI si aplica.
+
+---
+
+## 6. Estructura del repositorio
 
 ```
 Aval/
@@ -131,6 +156,7 @@ Aval/
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── jest.config.js
+│   ├── openapi.yaml          ← OpenAPI 3 / Swagger (spec + guía de pruebas)
 │   ├── template.yaml         ← SAM (API GW, Lambda, DynamoDB, S3)
 │   ├── samconfig.toml
 │   ├── Makefile              ← Build SAM
@@ -140,7 +166,7 @@ Aval/
 │   │   ├── services/         ← Lógica de negocio + PDF
 │   │   ├── repositories/     ← SQLite / DynamoDB / S3
 │   │   ├── shared/           ← OTP, response, DI container
-│   │   └── local-server.ts   ← Express local :4000
+│   │   └── local-server.ts   ← Express local :4000 (+ Swagger UI)
 │   └── tests/
 │
 └── frontend/
@@ -157,7 +183,7 @@ Aval/
 
 ---
 
-## 6. Requisitos previos
+## 7. Requisitos previos
 
 - **Node.js** 18 o superior (probado con Node 24)
 - **npm** 9+
@@ -166,7 +192,7 @@ Aval/
 
 ---
 
-## 7. Arranque local
+## 8. Arranque local
 
 Abra **dos terminales** en la raíz del proyecto.
 
@@ -190,6 +216,8 @@ npm run dev:backend
 ```
 
 - URL: `http://localhost:4000`
+- Swagger UI: `http://localhost:4000/api/docs`
+- Spec OpenAPI: [`backend/openapi.yaml`](backend/openapi.yaml) (`/api/openapi.yaml`)
 - Modo: SQLite local (`LOCAL_MODE=true`)
 - Persistencia: `backend/.data/aval.db` (sobrevive reinicios; borrar el archivo resetea los datos)
 
@@ -200,13 +228,13 @@ npm run dev:frontend
 ```
 
 - URL: `http://localhost:3000`
-- Proxy Webpack: `/api` y `/mock-mail` → `http://localhost:4000`
+- Proxy Webpack: `/api` → `http://localhost:4000`
 
 Abra el navegador en: **http://localhost:3000**
 
 ---
 
-## 8. Guía de demo (paso a paso)
+## 9. Guía de demo (paso a paso)
 
 1. Ir a **Nueva solicitud**.
 2. Completar:
@@ -225,7 +253,7 @@ Abra el navegador en: **http://localhost:3000**
 
 ---
 
-## 9. Modelo de dominio y estados
+## 10. Modelo de dominio y estados
 
 ### Solicitud
 
@@ -268,10 +296,19 @@ Pendiente ──(aprobar)──► Firmado
 
 ---
 
-## 10. API REST
+## 11. API REST
 
 Base local: `http://localhost:4000`  
 Base AWS: `https://{api-id}.execute-api.{region}.amazonaws.com/Prod`
+
+**Documentación OpenAPI / Swagger**
+
+| Recurso | URL / ruta |
+|---------|------------|
+| Swagger UI (Try it out) | [http://localhost:4000/api/docs](http://localhost:4000/api/docs) |
+| Spec YAML | [`backend/openapi.yaml`](backend/openapi.yaml) o `GET /api/openapi.yaml` |
+
+La guía de pruebas paso a paso está en la descripción del spec (visible en Swagger UI).
 
 Todas las respuestas de error siguen el formato:
 
@@ -399,7 +436,7 @@ CORS habilitado (`Access-Control-Allow-Origin: *`).
 
 ---
 
-## 11. Frontend (vistas y MFEs)
+## 12. Frontend (vistas y MFEs)
 
 ### Rutas
 
@@ -424,7 +461,7 @@ El shell monta ambos MFEs por rutas; el `remoteEntry.js` permite consumirlos des
 
 ---
 
-## 12. Backend (capas y persistencia)
+## 13. Backend (capas y persistencia)
 
 | Capa | Responsabilidad |
 |------|-----------------|
@@ -450,7 +487,7 @@ Objetos: `evidencias/{solicitudId}.pdf`
 
 ---
 
-## 13. OTP, tokens y seguridad
+## 14. OTP, tokens y seguridad
 
 | Aspecto | Comportamiento |
 |---------|----------------|
@@ -466,7 +503,7 @@ Objetos: `evidencias/{solicitudId}.pdf`
 
 ---
 
-## 14. PDF de evidencia
+## 15. PDF de evidencia
 
 Generado automáticamente cuando los **3** aprobadores están en `Firmado`.
 
@@ -476,11 +513,12 @@ Contenido:
 - Tabla/sección de aprobadores: rol, nombre, email, estado, firma y timestamp
 - Firma tipográfica simulada (estilo cursiva + línea)
 
-Endpoint de descarga: `/api/solicitudes/{id}/evidencia.pdf`
+Endpoint de descarga: `/api/solicitudes/{id}/evidencia.pdf`  
+En AWS, API Gateway trata `application/pdf` como binario (`BinaryMediaTypes`). El frontend descarga con `Accept: application/pdf` y arma un blob local.
 
 ---
 
-## 15. Pruebas y cobertura
+## 16. Pruebas y cobertura
 
 ### Ejecutar
 
@@ -510,7 +548,7 @@ Reportes HTML: `backend/coverage/` y `frontend/coverage/`.
 
 ---
 
-## 16. Despliegue en AWS (SAM)
+## 17. Despliegue en AWS (SAM)
 
 ### Recursos provisionados (`backend/template.yaml`)
 
@@ -541,17 +579,18 @@ Anote la salida `ApiUrl` del stack.
 
 ### Conectar el frontend a la API desplegada
 
-Opciones:
+1. Anote el `ApiUrl` del stack SAM.
+2. En `frontend/.env` (copie desde `frontend/.env.example`):
 
-1. Cambiar el proxy de Webpack al `ApiUrl`, o  
-2. Definir `API_BASE_URL` en el build del frontend apuntando al API Gateway.
-
-Ejemplo conceptual:
-
-```bash
-# En frontend, configurar baseURL de Axios / variable de entorno de build
+```env
 API_BASE_URL=https://xxxx.execute-api.us-east-1.amazonaws.com/Prod
 ```
+
+3. Reinicie el frontend (`npm run dev:frontend`). Debe verse en consola:
+   `[aval] API_BASE_URL=https://...`
+4. Axios, el proxy `/api` y el link del PDF usarán ese host.
+
+Sin `API_BASE_URL`, el frontend espera backend local en `http://localhost:4000`.
 
 El parámetro `AppBaseUrl` se usa para armar los links de los correos simulados (`/approve?solicitud_id=...&approver_token=...`).
 
@@ -563,7 +602,7 @@ sam delete --stack-name aval-aprobaciones
 
 ---
 
-## 17. Scripts disponibles
+## 18. Scripts disponibles
 
 ### Raíz
 
@@ -595,7 +634,7 @@ sam delete --stack-name aval-aprobaciones
 
 ---
 
-## 18. Variables de entorno
+## 19. Variables de entorno
 
 | Variable | Default local | Descripción |
 |----------|---------------|-------------|
@@ -605,15 +644,18 @@ sam delete --stack-name aval-aprobaciones
 | `SQLITE_PATH` | `backend/.data/aval.db` | Ruta del archivo SQLite (solo local) |
 | `TABLE_NAME` | — | Tabla DynamoDB (AWS) |
 | `BUCKET_NAME` | — | Bucket S3 de PDFs (AWS) |
-| `API_BASE_URL` | `''` (mismo origen) | Base URL Axios en frontend |
+| `API_BASE_URL` | `''` (mismo origen / proxy `:4000`) | Base del API en frontend (`frontend/.env`) |
 
 ---
 
-## 19. Troubleshooting
+## 20. Troubleshooting
 
 | Problema | Solución |
 |----------|----------|
-| Frontend no llama al API | Verifique que el backend esté en `:4000` y el proxy de Webpack activo |
+| Frontend no llama al API | Verifique que el backend esté en `:4000` **o** que `frontend/.env` tenga `API_BASE_URL` y reinicie Webpack |
+| PDF proxy ECONNREFUSED | El link iba a `:4000` sin backend local; configure `API_BASE_URL` en `frontend/.env` y reinicie |
+| PDF dañado / corrupto | API Gateway no decodificaba binario; redespliegue con `application~1pdf` y use el botón Descargar (blob). No uses `*/*` en BinaryMediaTypes |
+| Network Error / ERR_FAILED al crear solicitud | Suele ser CORS o `BinaryMediaTypes: */*` rompiendo JSON; quite `*/*`, redespliegue SAM y recargue el frontend |
 | OTP inválido | Use el OTP del mail de ese aprobador en Mock mail (si expiró, reabra el link) |
 | OTP expirado | Espere < 3 min o vuelva a abrir el link de aprobación |
 | “Sesión OTP inválida” | Valide de nuevo el OTP antes de aprobar/rechazar |

@@ -9,7 +9,11 @@ import {
 import { MockMail, Solicitud } from '../domain/types';
 import { MailStore, SolicitudStore } from './interfaces';
 
-const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const client = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+  marshallOptions: {
+    removeUndefinedValues: true,
+  },
+});
 
 function tableName(): string {
   const name = process.env.TABLE_NAME;

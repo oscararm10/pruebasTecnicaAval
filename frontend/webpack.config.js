@@ -3,7 +3,32 @@ const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { ModuleFederationPlugin } = require('webpack').container;
 
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 const deps = require('./package.json').dependencies;
+const API_BASE_URL = (process.env.API_BASE_URL || '').replace(/\/$/, '');
+
+function buildApiProxy() {
+  if (!API_BASE_URL) {
+    return {
+      context: ['/api'],
+      target: 'http://localhost:4000',
+      changeOrigin: true,
+    };
+  }
+
+  const url = new URL(API_BASE_URL);
+  const stagePath = url.pathname.replace(/\/$/, ''); // e.g. /Prod
+  return {
+    context: ['/api'],
+    target: url.origin,
+    changeOrigin: true,
+    secure: true,
+    pathRewrite: stagePath
+      ? { '^/api': `${stagePath}/api` }
+      : undefined,
+  };
+}
 
 /**
  * Micro-frontends con Webpack Module Federation:
@@ -63,22 +88,23 @@ module.exports = {
       title: 'Aval - Aprobaciones',
     }),
     new webpack.DefinePlugin({
-      'process.env.API_BASE_URL': JSON.stringify(
-        process.env.API_BASE_URL || ''
-      ),
+      'process.env.API_BASE_URL': JSON.stringify(API_BASE_URL),
     }),
+    {
+      apply(compiler) {
+        compiler.hooks.environment.tap('LogApiBase', () => {
+          console.log(
+            `[aval] API_BASE_URL=${API_BASE_URL || '(vacío → proxy local :4000)'}`
+          );
+        });
+      },
+    },
   ],
   devServer: {
     port: 3000,
     historyApiFallback: true,
     hot: true,
     // Solo /api: /mock-mail es ruta SPA del frontend; el API es GET /api/mock-mail
-    proxy: [
-      {
-        context: ['/api'],
-        target: 'http://localhost:4000',
-        changeOrigin: true,
-      },
-    ],
+    proxy: [buildApiProxy()],
   },
 };

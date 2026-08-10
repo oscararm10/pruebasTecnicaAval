@@ -79,7 +79,52 @@ export async function listMockMails(solicitudId?: string): Promise<MockMail[]> {
 }
 
 export function evidenciaUrl(id: string): string {
-  return `/api/solicitudes/${id}/evidencia.pdf`;
+  const base = (process.env.API_BASE_URL || '').replace(/\/$/, '');
+  return `${base}/api/solicitudes/${id}/evidencia.pdf`;
+}
+
+/**
+ * Descarga el PDF como blob (Accept: application/pdf) para que API Gateway
+ * trate bien el binario y no se guarde el base64 como archivo corrupto.
+ */
+export async function downloadEvidencia(id: string): Promise<void> {
+  const response = await api.get(`/api/solicitudes/${id}/evidencia.pdf`, {
+    responseType: 'arraybuffer',
+    headers: { Accept: 'application/pdf' },
+  });
+
+  let bytes = new Uint8Array(response.data as ArrayBuffer);
+
+  // Si API Gateway no decodificó, el cuerpo llega como texto base64 (JVBERi...).
+  const asText = new TextDecoder().decode(bytes.subarray(0, 20));
+  if (asText.startsWith('JVBERi')) {
+    const base64 = new TextDecoder().decode(bytes).replace(/\s/g, '');
+    const bin = atob(base64);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  }
+
+  const header = new TextDecoder().decode(bytes.subarray(0, 4));
+  if (header !== '%PDF') {
+    let message = 'El archivo PDF recibido está corrupto o incompleto';
+    try {
+      const err = JSON.parse(new TextDecoder().decode(bytes)) as { error?: string };
+      if (err.error) message = err.error;
+    } catch {
+      // no es JSON
+    }
+    throw new Error(message);
+  }
+
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `evidencia-${id}.pdf`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function formatMoney(value: number): string {
